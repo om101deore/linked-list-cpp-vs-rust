@@ -1,0 +1,10 @@
+#+TITLE:     Linkedlist in rust
+#+AUTHOR:    Author
+#+DATE:      2026-07-15
+
+* Linkedlist in Rust
+#+BEGIN_SRC bash
+> rustc main.rs
+> ./main
+
+#+END_SRC

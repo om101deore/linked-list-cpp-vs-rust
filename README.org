@@ -1,0 +1,8 @@
+* Linkedlist in C++ vs Rust
+** How to run
+#+BEGIN_SRC bash
+> git clone https://github.com/om101deore/linked-list-cpp-vs-rust
+
+#+END_SRC
+
+go to individual folders and run the code separately.
