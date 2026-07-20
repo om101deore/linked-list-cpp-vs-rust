@@ -1,4 +1,7 @@
-* Linkedlist in C++ vs Rust
+#+TITLE: Box<T> (Rust) vs unique_ptr<T> (C++): Ownership Semantics
+#+AUTHOR: Om Deore
+#+OPTIONS: toc:nil num:t
+
 ** How to run
 #+BEGIN_SRC bash
 > git clone https://github.com/om101deore/linked-list-cpp-vs-rust
@@ -6,3 +9,131 @@
 #+END_SRC
 
 go to individual folders and run the code separately.
+
+** 1. Ownership Model
+   Both follow a single-owner (move-only) ownership model, enforced at
+   /compile time/ rather than at runtime.
+
+   - =unique_ptr= guarantees that only one =unique_ptr= instance owns a
+     given heap allocation at a time. Copying is disabled (copy
+     constructor/assignment are deleted); only moving (=std::move=) is
+     allowed, transferring ownership and leaving the source empty
+     (=nullptr=).
+   - Rust's =Box<T>= behaves the same way, but this is enforced by the
+     *ownership and borrow checker*, not by deleted copy constructors.
+     Assigning a =Box= moves it by default (no explicit "move" keyword
+     needed) — the old variable simply becomes invalid and the
+     compiler refuses to let you use it again.
+   - This single-owner model maps naturally onto a *singly linked
+     list*, where each node has exactly one owner (the previous node,
+     or the list head).
+   - For structures needing shared ownership (doubly linked lists,
+     graphs), both languages move to reference-counted pointers:
+     =std::shared_ptr= in *C++*, and =Rc<T>= (single-threaded) or
+     =Arc<T>= (thread-safe) in *Rust* — optionally paired with
+     =RefCell<T>= / =Mutex<T>= for interior mutability, since =Rc= only
+     grants shared *immutable* access by default.
+     (Correction: the original point said "we will need to use Rc in
+     rust and shared_ptr in rust" — the second one should read *C++*.)
+
+** 2. Null vs =None=
+   - =unique_ptr= has a well-defined "empty" state, which compares
+     equal to =nullptr=. It is still a real pointer type — it just may
+     hold the null value.
+   - Rust has no null pointers for safe code. Instead, "may or may not
+     have a value" is modeled explicitly with =Option<T>=.
+   - Correction: in the code, the =next= field's type is
+     =Option<Box<Node<T>>>= (aliased as =Link<T>=) — i.e. =Option=
+     wrapping a =Box=, not =Option<Node>= directly. This distinction
+     matters: =Option<Box<Node<T>>>= is pointer-sized (Rust applies the
+     "null pointer optimization," using the all-zero bit pattern to
+     represent =None=, since =Box= itself can never be null), so it has
+     no extra memory overhead versus a raw nullable pointer.
+   - Practically, =Option= forces the caller to explicitly handle the
+     "empty" case (via =match=, =if let=, =.unwrap()=, etc.) before
+     accessing the value. =unique_ptr=, by contrast, allows you to
+     dereference it (=*ptr= or =ptr->member=) even when it's null,
+     which compiles fine and causes *undefined behavior* at runtime.
+     This is a genuine safety difference, not just a style difference.
+
+** 3. Moving the =next=/tail pointer out (corrected)
+   The original point conflates two different mechanisms. What's
+   actually happening:
+
+   - In *C++*, =std::move(head->next)= doesn't itself do anything — it's
+     just a cast to an rvalue reference that *permits* a move. The
+     actual transfer happens in =unique_ptr='s move assignment
+     operator, which steals the raw pointer from the source and
+     resets the source to =nullptr=. You're allowed to leave
+     =head->next= (a struct member) in this moved-from/null state
+     because C++ doesn't track "partially moved" struct fields at the
+     type level.
+   - In *Rust*, you generally *cannot* move a value out of a field
+     that's only reachable through a reference (like =&mut self.head=)
+     without immediately replacing it with something — the borrow
+     checker forbids leaving a struct field in an unspecified
+     "moved-out" state. =Option::take()= exists precisely to solve
+     this: it atomically swaps the field's contents with =None= and
+     returns what used to be there, so the field is always left in a
+     valid, fully-initialized state (=None=) rather than a
+     half-moved one.
+   - So the C++ side relies on "moved-from is a valid empty state" and
+     the Rust side relies on "always leave something valid behind" —
+     two different resolutions to the same underlying problem (you
+     can't have two owners of the same heap node).
+
+* Additional Differences
+
+** 4. Explicit vs. Default Move Semantics
+   In C++, moves must usually be requested explicitly with
+   =std::move= (as seen in both =push= and =pop=); a plain assignment
+   of a =unique_ptr= without =std::move= is a compile error. In Rust,
+   ownership transfer is the *default* behavior for non-=Copy= types —
+   e.g. =self.head.take()= already returns an owned value with no
+   extra syntax needed to "move" it into the new =Node=.
+
+** 5. Compile-Time Safety of Dereferencing
+   Rust's borrow checker + =Option= combination statically eliminates
+   null-pointer dereferences for safe Rust code — there is no way to
+   accidentally call =.value= on a =None=. In C++, nothing stops
+   =head->value= from being called when =head == nullptr=; that's a
+   runtime UB bug the compiler will not catch. Rust trades a small
+   amount of ergonomic overhead (=match=/=if let=) for this guarantee.
+
+** 6. Recursive Destruction / Stack Overflow Risk (shared risk)
+   Both implementations are susceptible to the same subtle bug: when
+   the list is dropped/destroyed, both =Box= and =unique_ptr= trigger
+   *recursive* destructor calls (each node's destructor drops its
+   =next=, which drops its =next=, ...). For a very long list, this can
+   blow the call stack in *both* languages. Note that the Rust
+   =drop(&mut self)= method here doesn't actually solve this — it just
+   reassigns =self.head = None=, which still triggers the same
+   recursive drop chain on the old value. An iterative drop (popping
+   nodes in a loop) would be needed in either language to avoid this.
+
+** 7. =Drop= trait vs. user-defined method (naming trap)
+   The C++ class defines a real destructor (=~LinkedList()=), which the
+   compiler calls automatically. The Rust struct's =pub fn drop(&mut
+   self)= is /not/ an implementation of the =Drop= trait — it's just a
+   regular method that happens to be named "drop." It will *not* be
+   called automatically when the list goes out of scope, and calling
+   it manually shadows/conflicts conceptually with =std::mem::drop=.
+   To hook into automatic destruction in Rust, one must =impl
+   Drop for MyLinkedList<T> { fn drop(&mut self) { ... } }=.
+
+** 8. Raw pointers vs. borrow-checked references during traversal
+   C++'s =traverse()= uses a raw pointer, =Node<int>* curr = head.get()=
+   (also worth noting: hardcoded =Node<int>= instead of =Node<T>=, a
+   likely bug in a generic method). Raw pointers carry no lifetime or
+   validity guarantees — nothing stops =curr= from outliving the list.
+   Rust's =traverse()= uses =&self.head= / =&n.next=, ordinary borrowed
+   references whose lifetimes are checked by the compiler, guaranteeing
+   they can't outlive the data they point to.
+
+** 9. Generic instantiation differences
+   Rust's =MyLinkedList<T>= is only implemented for =T: Display= via a
+   trait bound (=impl<T: Display> MyLinkedList<T>=), enforced at the
+   =impl= level. C++ templates are checked lazily at instantiation
+   time (duck typing) — =LinkedList<T>::traverse= will only fail to
+   compile for a type without =operator<<= if/when =traverse()= is
+   actually instantiated for that =T=.

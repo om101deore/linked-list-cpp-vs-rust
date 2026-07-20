@@ -25,7 +25,6 @@ impl<T: Display> MyLinkedList<T> {
     }
 
     pub fn pop(&mut self) -> Option<T> {
-
         return match self.head.take() {
             Some(h) => {
                 let val = h.value;
@@ -34,7 +33,6 @@ impl<T: Display> MyLinkedList<T> {
             }
             None => None,
         };
-
     }
 
     pub fn traverse(&self) {
@@ -46,8 +44,7 @@ impl<T: Display> MyLinkedList<T> {
                     print!("{} -> ", n.value);
                     node = &n.next
                 }
-                None => 
-                {
+                None => {
                     println!("()");
                     break;
                 }
@@ -55,7 +52,7 @@ impl<T: Display> MyLinkedList<T> {
         }
     }
 
-    pub fn drop(&mut self){
+    pub fn drop(&mut self) {
         self.head = None;
     }
 }

@@ -36,7 +36,6 @@ LinkedList<T>::~LinkedList() {
 
 template <class T>
 void LinkedList<T>::push(T value) {
-
     std::unique_ptr<Node<int>> nn = std::make_unique<Node<T>>();
 
     nn->value = value;
@@ -47,14 +46,12 @@ void LinkedList<T>::push(T value) {
 
 template <class T>
 T LinkedList<T>::pop() {
-    if (head ==nullptr) {
+    if (head == nullptr) {
         throw std::runtime_error("List is empty. ");
     }
 
-
     T value = head->value;
     head = std::move(head->next);
-
 
     return value;
 }
